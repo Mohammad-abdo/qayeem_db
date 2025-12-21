@@ -1,0 +1,815 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// User Management
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String
+  nameAr    String?
+  password  String
+  role      UserRole @default(USER)
+  isActive  Boolean  @default(true)
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdEvaluations Evaluation[]      @relation("EvaluationCreator")
+  ratings            Rating[]
+  notifications      Notification[]
+  activityLogs       ActivityLog[]
+  createdBooks       Book[]            @relation("BookCreator")
+  payments           Payment[]         @relation("UserPayments")
+  userRoles          UserRoleMapping[] @relation("UserRoles")
+  bookReviews        BookReview[]      @relation("UserBookReviews")
+  bookProgress       BookProgress[]    @relation("UserBookProgress")
+  coupons            DiscountCoupon[]  @relation("UserCoupons")
+  createdCoupons     DiscountCoupon[]  @relation("CouponCreator")
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+  EVALUATOR
+  MANAGER
+
+  @@map("user_roles")
+}
+
+// Evaluation/Assessment System
+model Evaluation {
+  id                Int              @id @default(autoincrement())
+  title             String
+  titleAr           String?
+  description       String?          @db.Text
+  descriptionAr     String?          @db.Text
+  image             String?
+  type              EvaluationType
+  status            EvaluationStatus @default(DRAFT)
+  startDate         DateTime?
+  endDate           DateTime?
+  practicesPercentage Float?         @default(50) // Percentage for PRACTICES books (0-100)
+  patternsPercentage  Float?         @default(50) // Percentage for PATTERNS books (0-100)
+  createdBy         Int
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  creator    User             @relation("EvaluationCreator", fields: [createdBy], references: [id])
+  criteria   Criterion[]
+  ratings    Rating[]
+  reports    Report[]
+  books      BookEvaluation[]
+  categories BookCategory[]   @relation("CategoryEvaluation")
+
+  @@map("evaluations")
+}
+
+enum EvaluationType {
+  SELF_ASSESSMENT
+  PEER_REVIEW
+  MANAGER_REVIEW
+  PERFORMANCE_REVIEW
+  TEAM_EVALUATION
+
+  @@map("evaluation_types")
+}
+
+enum EvaluationStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+  CANCELLED
+
+  @@map("evaluation_statuses")
+}
+
+// Criteria for Evaluation
+model Criterion {
+  id            Int       @id @default(autoincrement())
+  evaluationId  Int
+  title         String
+  titleAr       String?
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  weight        Float    @default(1.0)
+  maxScore      Float    @default(10.0)
+  order         Int      @default(0)
+  isRequired    Boolean  @default(true)
+  bookType      BookType? // Book type: PRACTICES or PATTERNS
+  questionPercentage Float? @default(0) // Percentage weight of this question in the evaluation (0-100)
+  // Answer option percentages (must sum to 100)
+  answer1Percentage Float? @default(20) // لا ينطبق
+  answer2Percentage Float? @default(20) // ينطبق قليلاً
+  answer3Percentage Float? @default(20) // ينطبق إلى حد ما
+  answer4Percentage Float? @default(20) // ينطبق كثيراً
+  answer5Percentage Float? @default(20) // ينطبق تماماً
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  evaluation  Evaluation   @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  ratingItems RatingItem[]
+
+  @@index([evaluationId])
+  @@index([bookType])
+  @@map("criteria")
+}
+
+// Rating/Score Submission
+model Rating {
+  id           Int          @id @default(autoincrement())
+  evaluationId Int
+  userId       Int
+  status       RatingStatus @default(PENDING)
+  totalScore   Float?
+  submittedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  evaluation Evaluation   @relation(fields: [evaluationId], references: [id])
+  user       User         @relation(fields: [userId], references: [id])
+  items      RatingItem[]
+
+  @@unique([evaluationId, userId])
+  @@index([evaluationId])
+  @@index([userId])
+  @@map("ratings")
+}
+
+enum RatingStatus {
+  PENDING
+  DRAFT
+  SUBMITTED
+  REVIEWED
+  REJECTED
+
+  @@map("rating_statuses")
+}
+
+// Individual Rating Items
+model RatingItem {
+  id          Int      @id @default(autoincrement())
+  ratingId    Int
+  criterionId Int
+  score       Float
+  comment     String?  @db.Text
+  commentAr   String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rating    Rating    @relation(fields: [ratingId], references: [id], onDelete: Cascade)
+  criterion Criterion @relation(fields: [criterionId], references: [id])
+
+  @@unique([ratingId, criterionId])
+  @@index([ratingId])
+  @@index([criterionId])
+  @@map("rating_items")
+}
+
+// Reports/Analytics
+model Report {
+  id           Int        @id @default(autoincrement())
+  evaluationId Int
+  type         ReportType
+  title        String
+  titleAr      String?
+  data         Json
+  generatedAt  DateTime   @default(now())
+  generatedBy  Int?
+
+  evaluation Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@index([evaluationId])
+  @@map("reports")
+}
+
+enum ReportType {
+  SUMMARY
+  DETAILED
+  COMPARATIVE
+  STATISTICAL
+
+  @@map("report_types")
+}
+
+// Settings/Configuration
+model Setting {
+  id            Int      @id @default(autoincrement())
+  key           String   @unique
+  value         String   @db.Text
+  valueAr       String?  @db.Text
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  updatedAt     DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// Notifications
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  title     String
+  titleAr   String?
+  message   String           @db.Text
+  messageAr String?          @db.Text
+  type      NotificationType
+  isRead    Boolean          @default(false)
+  link      String?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  EVALUATION_CREATED
+  RATING_DUE
+  RATING_SUBMITTED
+
+  @@map("notification_types")
+}
+
+// Activity Logs
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  action    String
+  actionAr  String?
+  entity    String?
+  entityAr  String?
+  entityId  Int?
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
+
+// Books Management System
+model Book {
+  id                Int        @id @default(autoincrement())
+  title             String
+  titleAr           String?
+  description       String?    @db.Text
+  descriptionAr     String?    @db.Text
+  author            String?
+  authorAr          String?
+  isbn              String?    @unique
+  price             Decimal    @db.Decimal(10, 2)
+  discountPercentage Float?    @default(0) // Discount percentage (0-100) set by admin
+  coverImage        String?
+  category          String?
+  categoryAr        String?
+  bookType          BookType? // Book type: PRACTICES or PATTERNS
+  status            BookStatus @default(ACTIVE)
+  stock             Int        @default(0)
+  publishedAt       DateTime?
+  createdBy         Int?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  items         BookItem[]
+  payments      Payment[]
+  reviews       BookReview[]
+  progress      BookProgress[]   @relation("BookProgress")
+  createdByUser User?            @relation("BookCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  evaluations   BookEvaluation[]
+  bookCategory  BookCategory?    @relation("BookCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  categoryId    Int?
+
+  @@index([isbn])
+  @@index([status])
+  @@index([category])
+  @@index([categoryId])
+  @@index([bookType])
+  @@map("books")
+}
+
+enum BookStatus {
+  ACTIVE
+  INACTIVE
+  OUT_OF_STOCK
+  ARCHIVED
+
+  @@map("book_statuses")
+}
+
+enum BookType {
+  PRACTICES
+  PATTERNS
+
+  @@map("book_types")
+}
+
+// Book Items (many items per book)
+model BookItem {
+  id         Int          @id @default(autoincrement())
+  bookId     Int
+  title      String
+  titleAr    String?
+  content    String?      @db.Text
+  contentAr  String?      @db.Text
+  itemType   BookItemType
+  order      Int          @default(0)
+  pageNumber Int?
+  isFree     Boolean      @default(false)
+  fileUrl    String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@index([bookId])
+  @@index([order])
+  @@map("book_items")
+}
+
+enum BookItemType {
+  CHAPTER
+  SECTION
+  EXERCISE
+  QUIZ
+  VIDEO
+  AUDIO
+  DOCUMENT
+  LINK
+
+  @@map("book_item_types")
+}
+
+// Payments Management
+model Payment {
+  id            Int           @id @default(autoincrement())
+  userId        Int
+  bookId        Int?
+  bookType      BookType? // Store book type for analytics
+  amount        Decimal       @db.Decimal(10, 2)
+  currency      String        @default("SAR")
+  status        PaymentStatus @default(PENDING)
+  paymentMethod PaymentMethod
+  transactionId String?       @unique
+  couponCode    String? // Discount coupon code used
+  discountAmount Decimal?     @db.Decimal(10, 2) // Discount amount applied
+  paymentDate   DateTime?
+  notes         String?       @db.Text
+  notesAr       String?       @db.Text
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user    User             @relation("UserPayments", fields: [userId], references: [id], onDelete: Cascade)
+  book    Book?            @relation(fields: [bookId], references: [id], onDelete: SetNull)
+  coupon  DiscountCoupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  couponId Int?
+  history PaymentHistory[]
+
+  @@index([userId])
+  @@index([bookId])
+  @@index([bookType])
+  @@index([status])
+  @@index([transactionId])
+  @@index([paymentDate])
+  @@index([couponCode])
+  @@index([couponId])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+
+  @@map("payment_statuses")
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  BANK_TRANSFER
+  PAYPAL
+  APPLE_PAY
+  GOOGLE_PAY
+  MADA
+  CASH
+
+  @@map("payment_methods")
+}
+
+// Payment History (audit trail)
+model PaymentHistory {
+  id        Int           @id @default(autoincrement())
+  paymentId Int
+  status    PaymentStatus
+  notes     String?       @db.Text
+  notesAr   String?       @db.Text
+  createdAt DateTime      @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([createdAt])
+  @@map("payment_history")
+}
+
+// Book Reviews (Client Reviews)
+model BookReview {
+  id         Int      @id @default(autoincrement())
+  bookId     Int
+  userId     Int
+  rating     Int // 1-5 stars
+  comment    String?  @db.Text
+  commentAr  String?  @db.Text
+  isApproved Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  user User @relation("UserBookReviews", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, userId]) // One review per user per book
+  @@index([bookId])
+  @@index([userId])
+  @@index([isApproved])
+  @@index([rating])
+  @@map("book_reviews")
+}
+
+// User Reading Progress Tracking (Achievements)
+model BookProgress {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  bookId      Int
+  bookType    BookType? // Store book type for achievement tracking
+  pagesRead   Int       @default(0)
+  totalPages  Int       @default(0)
+  percentage  Decimal   @default(0) @db.Decimal(5, 2)
+  startDate   DateTime  @default(now())
+  completedAt DateTime?
+  lastReadAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation("UserBookProgress", fields: [userId], references: [id], onDelete: Cascade)
+  book Book @relation("BookProgress", fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId]) // One progress record per user per book
+  @@index([userId])
+  @@index([bookId])
+  @@index([bookType])
+  @@index([completedAt])
+  @@map("book_progress")
+}
+
+// Book Categories Management
+model BookCategory {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  nameAr        String?
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  evaluationId  Int? // Optional: Link category to specific evaluation
+  order         Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  books      Book[]      @relation("BookCategory")
+  evaluation Evaluation? @relation("CategoryEvaluation", fields: [evaluationId], references: [id], onDelete: SetNull)
+
+  @@index([name])
+  @@index([evaluationId])
+  @@index([isActive])
+  @@map("book_categories")
+}
+
+// Book-Evaluation Relationship (Many-to-Many)
+// Now supports linking evaluations to BookType (controlled from dashboard)
+model BookEvaluation {
+  id                 Int       @id @default(autoincrement())
+  bookId             Int? // Optional: if null, applies to all books of bookType
+  bookType           BookType? // Optional: if set, applies to all books of this type
+  evaluationId       Int
+  isRequired         Boolean   @default(false) // Is evaluation required for this book?
+  minScorePercentage Float?    @default(70.0) // Minimum score percentage required (0-100) to recommend this book
+  order              Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  book       Book?      @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  evaluation Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, evaluationId])
+  @@unique([bookType, evaluationId]) // One evaluation per bookType
+  @@index([bookId])
+  @@index([bookType])
+  @@index([evaluationId])
+  @@map("book_evaluations")
+}
+
+// Discount Coupons System
+model DiscountCoupon {
+  id            Int       @id @default(autoincrement())
+  code          String    @unique // Unique coupon code
+  description   String?   @db.Text
+  descriptionAr String?   @db.Text
+  discountType  DiscountType // PERCENTAGE or FIXED_AMOUNT
+  discountValue Decimal   @db.Decimal(10, 2) // Percentage (0-100) or fixed amount
+  minPurchaseAmount Decimal? @db.Decimal(10, 2) // Minimum purchase amount to use coupon
+  maxDiscountAmount Decimal? @db.Decimal(10, 2) // Maximum discount amount (for percentage)
+  userId        Int? // If set, coupon is for specific user only
+  usageLimit    Int? // Maximum number of times coupon can be used (null = unlimited)
+  usedCount     Int       @default(0) // Number of times coupon has been used
+  validFrom     DateTime  @default(now())
+  validUntil    DateTime? // Expiration date (null = no expiration)
+  isActive      Boolean   @default(true)
+  createdBy     Int? // Admin who created the coupon
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user      User?      @relation("UserCoupons", fields: [userId], references: [id], onDelete: SetNull)
+  creator   User?      @relation("CouponCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  payments  Payment[]
+
+  @@index([code])
+  @@index([userId])
+  @@index([isActive])
+  @@index([validFrom])
+  @@index([validUntil])
+  @@map("discount_coupons")
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+
+  @@map("discount_types")
+}
+
+// Enhanced Role & Permission System
+model Role {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  nameAr        String?
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  isSystem      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  permissions RolePermission[]
+  userRoles   UserRoleMapping[]
+
+  @@index([name])
+  @@map("roles")
+}
+
+model Permission {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  nameAr        String?
+  resource      String // e.g., 'books', 'evaluations', 'payments'
+  resourceAr    String?
+  action        String // e.g., 'create', 'read', 'update', 'delete'
+  actionAr      String?
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  createdAt     DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@unique([resource, action])
+  @@index([resource])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           Int      @id @default(autoincrement())
+  roleId       Int
+  permissionId Int
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRoleMapping {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  roleId     Int
+  assignedBy Int?
+  assignedAt DateTime  @default(now())
+  expiresAt  DateTime?
+
+  user User @relation("UserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles_mapping")
+}
+
+  bookId      Int
+  bookType    BookType? // Store book type for achievement tracking
+  pagesRead   Int       @default(0)
+  totalPages  Int       @default(0)
+  percentage  Decimal   @default(0) @db.Decimal(5, 2)
+  startDate   DateTime  @default(now())
+  completedAt DateTime?
+  lastReadAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation("UserBookProgress", fields: [userId], references: [id], onDelete: Cascade)
+  book Book @relation("BookProgress", fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId]) // One progress record per user per book
+  @@index([userId])
+  @@index([bookId])
+  @@index([bookType])
+  @@index([completedAt])
+  @@map("book_progress")
+}
+
+// Book Categories Management
+model BookCategory {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  nameAr        String?
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  evaluationId  Int? // Optional: Link category to specific evaluation
+  order         Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  books      Book[]      @relation("BookCategory")
+  evaluation Evaluation? @relation("CategoryEvaluation", fields: [evaluationId], references: [id], onDelete: SetNull)
+
+  @@index([name])
+  @@index([evaluationId])
+  @@index([isActive])
+  @@map("book_categories")
+}
+
+// Book-Evaluation Relationship (Many-to-Many)
+// Now supports linking evaluations to BookType (controlled from dashboard)
+model BookEvaluation {
+  id                 Int       @id @default(autoincrement())
+  bookId             Int? // Optional: if null, applies to all books of bookType
+  bookType           BookType? // Optional: if set, applies to all books of this type
+  evaluationId       Int
+  isRequired         Boolean   @default(false) // Is evaluation required for this book?
+  minScorePercentage Float?    @default(70.0) // Minimum score percentage required (0-100) to recommend this book
+  order              Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  book       Book?      @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  evaluation Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, evaluationId])
+  @@unique([bookType, evaluationId]) // One evaluation per bookType
+  @@index([bookId])
+  @@index([bookType])
+  @@index([evaluationId])
+  @@map("book_evaluations")
+}
+
+// Discount Coupons System
+model DiscountCoupon {
+  id            Int       @id @default(autoincrement())
+  code          String    @unique // Unique coupon code
+  description   String?   @db.Text
+  descriptionAr String?   @db.Text
+  discountType  DiscountType // PERCENTAGE or FIXED_AMOUNT
+  discountValue Decimal   @db.Decimal(10, 2) // Percentage (0-100) or fixed amount
+  minPurchaseAmount Decimal? @db.Decimal(10, 2) // Minimum purchase amount to use coupon
+  maxDiscountAmount Decimal? @db.Decimal(10, 2) // Maximum discount amount (for percentage)
+  userId        Int? // If set, coupon is for specific user only
+  usageLimit    Int? // Maximum number of times coupon can be used (null = unlimited)
+  usedCount     Int       @default(0) // Number of times coupon has been used
+  validFrom     DateTime  @default(now())
+  validUntil    DateTime? // Expiration date (null = no expiration)
+  isActive      Boolean   @default(true)
+  createdBy     Int? // Admin who created the coupon
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user      User?      @relation("UserCoupons", fields: [userId], references: [id], onDelete: SetNull)
+  creator   User?      @relation("CouponCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  payments  Payment[]
+
+  @@index([code])
+  @@index([userId])
+  @@index([isActive])
+  @@index([validFrom])
+  @@index([validUntil])
+  @@map("discount_coupons")
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+
+  @@map("discount_types")
+}
+
+// Enhanced Role & Permission System
+model Role {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  nameAr        String?
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  isSystem      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  permissions RolePermission[]
+  userRoles   UserRoleMapping[]
+
+  @@index([name])
+  @@map("roles")
+}
+
+model Permission {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  nameAr        String?
+  resource      String // e.g., 'books', 'evaluations', 'payments'
+  resourceAr    String?
+  action        String // e.g., 'create', 'read', 'update', 'delete'
+  actionAr      String?
+  description   String?  @db.Text
+  descriptionAr String?  @db.Text
+  createdAt     DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@unique([resource, action])
+  @@index([resource])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           Int      @id @default(autoincrement())
+  roleId       Int
+  permissionId Int
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRoleMapping {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  roleId     Int
+  assignedBy Int?
+  assignedAt DateTime  @default(now())
+  expiresAt  DateTime?
+
+  user User @relation("UserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles_mapping")
+}
